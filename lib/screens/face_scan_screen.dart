@@ -3,7 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../widgets/face_id_ring_painter.dart';
-import 'home_screen.dart';
+import 'verify.dart';
 
 class FaceScanScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -20,7 +20,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
   String _statusMessage = "Center your face and tap Verify";
 
   // Correct Python FastAPI server URL
-  final String pythonServerUrl = "http://192.168.1.72:8000/faces/verify";
+  final String pythonServerUrl = "http://10.238.8.1:8000/faces/verify";
 
   @override
   void initState() {
@@ -49,19 +49,19 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
     });
 
     try {
-      // 1️⃣ Take picture
+      // Take picture
       final XFile photo = await _controller!.takePicture();
 
-      // 2️⃣ Prepare multipart request
+      // Prepare multipart request
       var request = http.MultipartRequest('POST', Uri.parse(pythonServerUrl));
       request.files.add(await http.MultipartFile.fromPath('file', photo.path));
 
-      // 3️⃣ Send request and get response
+      // Send request and get response
       var response = await request.send();
       var responseData = await response.stream.bytesToString();
       var result = json.decode(responseData);
 
-      // 4️⃣ Handle verification
+      // Handle verification
       if (result['verified'] == true) {
         setState(() => _statusMessage = "Identity Verified: ${result['name']}");
         await Future.delayed(const Duration(seconds: 1));
@@ -70,7 +70,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
           Navigator.pushReplacement(
               context,
               MaterialPageRoute(
-                  builder: (context) => const HomeScreen()));
+                  builder: (context) => const Verify()));
         }
       } else {
         setState(() {

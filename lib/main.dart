@@ -1,4 +1,5 @@
 import 'package:camera/camera.dart';
+import 'package:face/screens/home_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'firebase_options.dart';
@@ -15,8 +16,16 @@ void main() async {
   // 2. Initialize Camera
   final List<CameraDescription> cameras = await availableCameras();
 
+
+  // String? fcmToken =
+
   runApp(MyApp(cameras: cameras));
 }
+
+
+
+
+
 
 class MyApp extends StatelessWidget {
   final List<CameraDescription> cameras;
@@ -38,7 +47,7 @@ class MyApp extends StatelessWidget {
         ),
       ),
       // Pass the cameras list down to the Scan Screen
-      home: FaceScanScreen(cameras: cameras),
+      home: HomeScreen(),
     );
   }
 }
