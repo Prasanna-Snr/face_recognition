@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:camera/camera.dart';
 import 'package:face/main.dart';
+import 'package:face/screens/face_scan_screen.dart';
 
 void main() {
   testWidgets('Face Scan Screen loads with cancel button', (WidgetTester tester) async {
@@ -13,17 +14,23 @@ void main() {
     );
     final cameras = [camera];
 
-    // 2. Build our app and pass the dummy cameras.
-    // Note: We use MyApp(cameras: cameras) because that's our root widget now.
-    await tester.pumpWidget(MyApp(cameras: cameras));
+    // 2. Build the app with isLoggedIn=false to ensure LoginScreen shows first
+    await tester.pumpWidget(MyApp(cameras: cameras, isLoggedIn: false));
 
-    // 3. Verify that the "Cancel" button exists.
+    // 3. Navigate manually to FaceScanScreen for testing
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(FaceScanScreen(cameras: cameras));
+
+    // 4. Wait for the widgets to build
+    await tester.pumpAndSettle();
+
+    // 5. Verify that the "Cancel" button exists
     expect(find.text('Cancel'), findsOneWidget);
 
-    // 4. Verify that the instruction text is present.
+    // 6. Verify that the instruction text is present
     expect(find.textContaining('Move your head'), findsOneWidget);
 
-    // 5. Verify that the counter '0' (from the old template) is NOT there.
+    // 7. Verify that a counter '0' (from older template) is NOT there
     expect(find.text('0'), findsNothing);
   });
 }

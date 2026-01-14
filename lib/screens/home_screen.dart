@@ -1,6 +1,12 @@
+// home_screen.dart
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:camera/camera.dart';
 import 'face_scan_screen.dart';
+import 'login_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -10,12 +16,78 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  String? username;
+  String? email;
+  Uint8List? firstFaceBytes;
+  final String backendUrl = "http://10.238.8.1:8000";
 
+  @override
+  void initState() {
+    super.initState();
+    loadUserData();
+  }
+
+  Uint8List? decodeBase64Image(String? base64) {
+    if (base64 == null || base64.isEmpty) return null;
+    try {
+      return base64Decode(base64);
+    } catch (e) {
+      print("Base64 decode error: $e");
+      return null;
+    }
+  }
+
+  Future<void> loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final phone = prefs.getString('phone');
+    if (phone == null) return;
+
+    final res = await http.get(Uri.parse("$backendUrl/users/$phone"));
+
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
+
+      Uint8List? bytes;
+      if (data['faces'] != null && data['faces'].isNotEmpty) {
+        bytes = decodeBase64Image(data['faces'][0]); // first face
+      }
+
+      setState(() {
+        username = data['username'];
+        email = data['email'];
+        firstFaceBytes = bytes;
+      });
+    } else {
+      print("Failed to fetch user data: ${res.body}");
+    }
+  }
+
+  Widget profileAvatar() {
+    if (firstFaceBytes == null) {
+      return const CircleAvatar(radius: 40, child: Icon(Icons.person));
+    }
+
+    return CircleAvatar(
+      radius: 40,
+      backgroundImage: MemoryImage(firstFaceBytes!),
+    );
+  }
+
+  Future<void> logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+      );
+    }
+  }
+
+  // Camera only load when Face Verify tapped
   Future<void> _openFaceScanScreen() async {
     try {
-      // Load cameras only when user clicks Face Verify
       final List<CameraDescription> cameras = await availableCameras();
-
       if (!mounted) return;
 
       Navigator.push(
@@ -25,12 +97,11 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     } catch (e) {
-      // Camera error handling
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Camera not available")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Camera not available")));
     }
   }
 
@@ -38,56 +109,41 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.blue,
-        title: const Text("Employee Provident Funds"),
+          title: const Text("Home"),
         centerTitle: true,
+        foregroundColor: Colors.white,
+        backgroundColor: Colors.blue,
       ),
-
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,
+
           children: [
-            const DrawerHeader(
-              decoration: BoxDecoration(color: Colors.blue),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircleAvatar(
-                    radius: 40,
-                    backgroundColor: Colors.white,
-                    child: Icon(Icons.person, size: 40, color: Colors.blue),
-                  ),
-
-                  Text(
-                    "Prasanna Sunuwar",
-                    style: TextStyle(color: Colors.white, fontSize: 18),
-                  ),
-                  Text(
-                    "prasannasunuwar03@gmail.com",
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ],
+            UserAccountsDrawerHeader(
+              decoration: BoxDecoration(
+                color: Colors.blue
               ),
+              accountName: Text(username ?? ''),
+              accountEmail: Text(email ?? ''),
+              currentAccountPicture: profileAvatar(),
             ),
-
             ListTile(
-              leading: const Icon(Icons.document_scanner_sharp),
+              leading: const Icon(Icons.verified_user),
               title: const Text("Face Verify"),
               onTap: () async {
                 Navigator.pop(context);
                 await _openFaceScanScreen();
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.logout),
+              title: const Text("Logout"),
+              onTap: logout,
+            ),
           ],
         ),
       ),
-
-      body: const Center(
-        child: Text(
-          "Home Screen",
-          style: TextStyle(fontSize: 18),
-        ),
-      ),
+      body: const Center(child: Text("Welcome!")),
     );
   }
 }

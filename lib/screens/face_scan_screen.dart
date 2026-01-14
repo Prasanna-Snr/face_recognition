@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/face_id_ring_painter.dart';
-import 'verify.dart';
 
 class FaceScanScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -19,15 +19,25 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
   bool _isProcessing = false;
   String _statusMessage = "Center your face and tap Verify";
 
-  // Correct Python FastAPI server URL
-  final String pythonServerUrl = "http://10.238.8.1:8000/faces/verify";
+  String pythonServerUrl = "http://10.238.8.1:8000/faces/verify";
+  String loggedInPhone = ""; // login user ko phone store garna
 
   @override
   void initState() {
     super.initState();
     _initCamera();
+    _loadUserPhone();
   }
 
+  // Login user ko phone load garne function
+  Future<void> _loadUserPhone() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      loggedInPhone = prefs.getString('phone') ?? "";
+    });
+  }
+
+  // Camera initialize garne function
   Future<void> _initCamera() async {
     final front = widget.cameras
         .firstWhere((c) => c.lensDirection == CameraLensDirection.front);
@@ -37,11 +47,16 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
     if (mounted) setState(() {});
   }
 
-  // --------------------
-  // Main face verification
-  // --------------------
+  // Face verification function
   Future<void> _verifyFace() async {
     if (_isProcessing) return;
+
+    if (loggedInPhone.isEmpty) {
+      setState(() {
+        _statusMessage = "User phone not found. Please login again.";
+      });
+      return;
+    }
 
     setState(() {
       _isProcessing = true;
@@ -49,39 +64,34 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
     });
 
     try {
-      // Take picture
       final XFile photo = await _controller!.takePicture();
 
-      // Prepare multipart request
+      // Multipart request prepare garne
       var request = http.MultipartRequest('POST', Uri.parse(pythonServerUrl));
       request.files.add(await http.MultipartFile.fromPath('file', photo.path));
+      request.fields['phone'] = loggedInPhone; // backend ma phone send garne
 
-      // Send request and get response
+      // Request send garne and response read garne
       var response = await request.send();
       var responseData = await response.stream.bytesToString();
       var result = json.decode(responseData);
 
-      // Handle verification
+      // Verification result handle garne
       if (result['verified'] == true) {
-        setState(() => _statusMessage = "Identity Verified: ${result['name']}");
-        await Future.delayed(const Duration(seconds: 1));
-
-        if (mounted) {
-          Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                  builder: (context) => const Verify()));
-        }
+        setState(() {
+          _statusMessage = "Face verified. Check notification for details.";
+          _isProcessing = false;
+        });
       } else {
         setState(() {
-          _isProcessing = false;
           _statusMessage = "Face not recognized. Try again.";
+          _isProcessing = false;
         });
       }
     } catch (e) {
       setState(() {
-        _isProcessing = false;
         _statusMessage = "Connection Error: Is Python server running?";
+        _isProcessing = false;
       });
       debugPrint("Face verification error: $e");
     }
@@ -115,23 +125,23 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
                     height: 250,
                     color: Colors.black,
                     child: FittedBox(
-                      fit: BoxFit.cover, // Keeps natural aspect ratio and fills the oval
+                      fit: BoxFit.cover,
                       child: SizedBox(
-                        width: _controller!.value.previewSize!.height, // notice height first
-                        height: _controller!.value.previewSize!.width,  // width second
+                        width: _controller!.value.previewSize!.height,
+                        height: _controller!.value.previewSize!.width,
                         child: CameraPreview(_controller!),
                       ),
                     ),
                   ),
                 ),
-
                 SizedBox(
                   width: 300,
                   height: 300,
                   child: CustomPaint(
                     painter: FaceIdRingPainter(
                       progress: _isProcessing ? 0.8 : 1.0,
-                      activeColor: _isProcessing ? Colors.blue : Colors.white24,
+                      activeColor:
+                      _isProcessing ? Colors.blue : Colors.white24,
                     ),
                   ),
                 ),
@@ -142,6 +152,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
           Text(
             _statusMessage,
             style: const TextStyle(color: Colors.white, fontSize: 18),
+            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 30),
           ElevatedButton(
