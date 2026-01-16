@@ -42,6 +42,10 @@ dependencies:
   firebase_messaging: ^16.1.0
   shared_preferences: ^2.5.4
   flutter_local_notifications: ^19.5.0
+  flutter_svg: ^2.2.3
+  google_mlkit_face_detection: ^0.13.1
+  google_mlkit_commons: ^0.11.0
+  image: ^4.0.0
 
 dev_dependencies:
   flutter_test:
@@ -66,11 +70,11 @@ flutter:
   uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
+  assets:
+   - assets/images/
   #   - images/a_dot_ham.jpeg
 
-  # An image asset can refer to one or more resolution-specific "variants", see
+  # An images asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
 
   # For details regarding adding assets from package dependencies, see

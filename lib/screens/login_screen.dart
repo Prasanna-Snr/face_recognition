@@ -1,10 +1,12 @@
-// login_screen.dart
 import 'dart:convert';
+import 'package:face/widgets/custom_button.dart';
+import 'package:face/widgets/custom_text_field.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'home_screen.dart';
-import 'sign_up_screen.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -20,7 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _passwordController = TextEditingController();
 
   bool _isLoading = false;
-  final String _backendUrl = "http://10.238.8.1:8000";
+  final String _backendUrl = "http://192.168.18.11:8000";
 
   @override
   void initState() {
@@ -65,8 +67,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
         await prefs.setBool('isLoggedIn', true);
         await prefs.setString('phone', _phoneController.text.trim());
-        await prefs.setString('username', (resBody['username'] ?? "").toString());
-        await prefs.setString('email', (resBody['email'] ?? "").toString());
+        await prefs.setString(
+          'username',
+          (resBody['username'] ?? "").toString(),
+        );
+        await prefs.setString(
+          'email',
+          (resBody['email'] ?? "").toString(),
+        );
 
         if (fcmToken != null) {
           await http.post(
@@ -87,13 +95,14 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(resBody['detail']?.toString() ?? 'Login failed')),
+          SnackBar(
+            content: Text(resBody['detail']?.toString() ?? 'Login failed'),
+          ),
         );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error: $e")),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Error: $e")));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -102,50 +111,70 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Login")),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              TextFormField(
-                controller: _phoneController,
-                decoration: const InputDecoration(labelText: "Phone"),
-                keyboardType: TextInputType.phone,
-                validator: (val) =>
-                val == null || val.length < 7 ? "Enter valid phone number" : null,
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child:SingleChildScrollView(
+          child: Container(
+            padding: EdgeInsets.symmetric(vertical: 30,horizontal: 15),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+          
+                  // Illustration
+                  SvgPicture.asset(
+                    'assets/images/login_illustration.svg',
+                    height: 150,
+                  ),
+                  const SizedBox(height: 30),
+          
+                  // Login Form
+                  Form(
+                    key: _formKey,
+                    child: Column(
+                      children: [
+                        CustomTextField(
+                          hintText: "Phone Number",
+                          prefixIcon: Icons.phone,
+                          controller: _phoneController,
+                          keyboardType: TextInputType.phone,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          maxLength: 10,
+                          validator: (val) =>
+                          val == null || val.length != 10
+                              ? "Enter valid phone number"
+                              : null,
+                        ),
+                        const SizedBox(height: 16),
+          
+                        CustomTextField(
+                          hintText: "Password",
+                          prefixIcon: Icons.lock,
+                          controller: _passwordController,
+                          isPassword: true,
+                          maxLength: 16,
+                          validator: (val) =>
+                          val == null || val.length < 6
+                              ? "Enter password (min 6 chars)"
+                              : null,
+                        ),
+                        const SizedBox(height: 32),
+          
+                        // Login Button or Loading
+                        _isLoading
+                            ? const Center(child: CircularProgressIndicator())
+                            : CustomButton(
+                          text: "Login",
+                          onPressed: _loginUser,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _passwordController,
-                decoration: const InputDecoration(labelText: "Password"),
-                obscureText: true,
-                validator: (val) =>
-                val == null || val.length < 6 ? "Password too short" : null,
-              ),
-              const SizedBox(height: 32),
-              _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : ElevatedButton(
-                onPressed: _loginUser,
-                child: const Text("Login"),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const SignUpScreen()),
-                  );
-                },
-                child: const Text("Sign up"),
-              ),
-            ],
           ),
         ),
-      ),
-    );
+        ),
+      );
   }
 
   @override

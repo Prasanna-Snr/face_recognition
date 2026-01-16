@@ -1,4 +1,3 @@
-// home_screen.dart
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -19,7 +18,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? username;
   String? email;
   Uint8List? firstFaceBytes;
-  final String backendUrl = "http://10.238.8.1:8000";
+  final String backendUrl = "http://192.168.18.11:8000";
 
   @override
   void initState() {
@@ -111,8 +110,10 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
           title: const Text("Home"),
         centerTitle: true,
-        foregroundColor: Colors.white,
-        backgroundColor: Colors.blue,
+        // foregroundColor: Colors.white,
+        // backgroundColor: Colors.blue,
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
       ),
       drawer: Drawer(
         child: ListView(
@@ -120,9 +121,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
           children: [
             UserAccountsDrawerHeader(
-              decoration: BoxDecoration(
-                color: Colors.blue
-              ),
+              // decoration: BoxDecoration(
+              //   color: Colors.blue
+              // ),
               accountName: Text(username ?? ''),
               accountEmail: Text(email ?? ''),
               currentAccountPicture: profileAvatar(),
