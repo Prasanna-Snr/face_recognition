@@ -1,201 +1,326 @@
 import 'dart:convert';
-import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:camera/camera.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-import '../widgets/face_id_ring_painter.dart';
-import '../notification_helper.dart'; // notification helper use garne
 
 class FaceScanScreen extends StatefulWidget {
-  final List<CameraDescription> cameras;
-
-  const FaceScanScreen({super.key, required this.cameras});
+  final String phone;
+  const FaceScanScreen({super.key, required this.phone});
 
   @override
-  State<FaceScanScreen> createState() => _FaceScanScreenState();
+  _FaceScanScreenState createState() => _FaceScanScreenState();
 }
 
 class _FaceScanScreenState extends State<FaceScanScreen> {
-  CameraController? _controller; // camera controller
-  bool _isProcessing = false; // face verify gariraheko ho ki hoina
-  String _statusMessage = "Center your face and tap Verify"; // user lai message
+  final FaceDetector faceDetector = FaceDetector(
+    options: FaceDetectorOptions(
+      enableContours: true,
+      enableClassification: true,
+      minFaceSize: 0.3,
+      performanceMode: FaceDetectorMode.fast,
+    ),
+  );
 
-  String pythonServerUrl = "http://192.168.18.11:8000/faces/verify"; // backend url
-  String loggedInPhone = ""; // login gareko user ko phone store garna
+  late CameraController cameraController;
+  bool isCameraInitialized = false;
+  bool isDetecting = false;
+  bool isFrontCamera = true;
+  List<String> challengeActions = ['smile', 'blink', 'lookRight', 'lookLeft'];
+  int currentActionIndex = 0;
+  bool waitingForNeutral = false;
+
+  double? smilingProbability;
+  double? leftEyeOpenProbability;
+  double? rightEyeOpenProbability;
+  double? headEulerAngleY;
 
   @override
   void initState() {
     super.initState();
-    _initCamera(); // camera initialize garna
-    _loadUserPhone(); // login user ko phone load garna
+    initializeCamera();
+    challengeActions.shuffle();
   }
 
-  // SharedPreferences bata phone load garne
-  Future<void> _loadUserPhone() async {
-    final prefs = await SharedPreferences.getInstance();
-    loggedInPhone = prefs.getString('phone') ?? "";
-  }
-
-  // Front camera initialize garne function
-  Future<void> _initCamera() async {
-    final frontCamera = widget.cameras.firstWhere(
-            (c) => c.lensDirection == CameraLensDirection.front);
-    _controller = CameraController(
-        frontCamera, ResolutionPreset.medium, enableAudio: false);
-    await _controller!.initialize();
-    if (mounted) setState(() {}); // UI update garna
-  }
-
-  // Face verify garne function
-  Future<void> _verifyFace() async {
-    if (_isProcessing) return; // already processing bhaye ignore garne
-
-    if (loggedInPhone.isEmpty) {
-      setState(() => _statusMessage = "User phone not found."); // phone missing
-      return;
+  Future<void> initializeCamera() async {
+    final cameras = await availableCameras();
+    final frontCamera = cameras.firstWhere(
+          (camera) => camera.lensDirection == CameraLensDirection.front,
+    );
+    cameraController = CameraController(
+      frontCamera,
+      ResolutionPreset.high,
+      enableAudio: false,
+    );
+    await cameraController.initialize();
+    if (mounted) {
+      setState(() {
+        isCameraInitialized = true;
+      });
+      startFaceDetection();
     }
+  }
 
-    // processing start
-    setState(() {
-      _isProcessing = true;
-      _statusMessage = "Verifying face...";
-    });
+  void startFaceDetection() {
+    if (isCameraInitialized) {
+      cameraController.startImageStream((CameraImage image) {
+        if (!isDetecting) {
+          isDetecting = true;
+          detectFaces(image).then((_) {
+            isDetecting = false;
+          });
+        }
+      });
+    }
+  }
 
+  Future<void> detectFaces(CameraImage image) async {
     try {
-      final photo = await _controller!.takePicture(); // camera bata photo
+      final WriteBuffer allBytes = WriteBuffer();
+      for (Plane plane in image.planes) {
+        allBytes.putUint8List(plane.bytes);
+      }
+      final bytes = allBytes.done().buffer.asUint8List();
 
-      // HTTP request prepare garne
-      final request =
-      http.MultipartRequest('POST', Uri.parse(pythonServerUrl));
-      request.files.add(await http.MultipartFile.fromPath('file', photo.path));
-      request.fields['phone'] = loggedInPhone;
+      final inputImage = InputImage.fromBytes(
+        bytes: bytes,
+        metadata: InputImageMetadata(
+          size: Size(image.width.toDouble(), image.height.toDouble()),
+          rotation: InputImageRotation.rotation270deg,
+          format: InputImageFormat.nv21,
+          bytesPerRow: image.planes[0].bytesPerRow,
+        ),
+      );
 
-      // request send garne
-      final response = await request.send();
-      final responseData = await response.stream.bytesToString();
-      final result = jsonDecode(responseData);
+      final faces = await faceDetector.processImage(inputImage);
 
-      // backend response handle
-      if (result['verified'] == true) {
+      if (!mounted) return;
+      if (faces.isNotEmpty) {
+        final face = faces.first;
         setState(() {
-          _statusMessage = "Face verified successfully"; // success message
-          _isProcessing = false;
+          smilingProbability = face.smilingProbability;
+          leftEyeOpenProbability = face.leftEyeOpenProbability;
+          rightEyeOpenProbability = face.rightEyeOpenProbability;
+          headEulerAngleY = face.headEulerAngleY;
         });
-
-        // foreground notification
-        await NotificationHelper.show(
-          title: "Face Verified",
-          body: "Identity confirmed",
-        );
-      } else {
-        setState(() {
-          _statusMessage = "Face not recognized. Try again."; // fail message
-          _isProcessing = false;
-        });
-
-        // foreground notification
-        await NotificationHelper.show(
-          title: "Verification Failed",
-          body: "Face does not match",
-        );
+        await checkChallenge(face);
       }
     } catch (e) {
-      setState(() {
-        _statusMessage = "Server error"; // network or backend error
-        _isProcessing = false;
-      });
+      debugPrint('Error in face detection: $e');
+    }
+  }
 
-      // foreground notification for error
-      await NotificationHelper.show(
-        title: "Error",
-        body: "Unable to verify face",
+  Future<void> checkChallenge(Face face) async {
+    if (waitingForNeutral) {
+      if (isNeutralPosition(face)) {
+        waitingForNeutral = false;
+      } else {
+        return;
+      }
+    }
+
+    String currentAction = challengeActions[currentActionIndex];
+    bool actionCompleted = false;
+
+    switch (currentAction) {
+      case 'smile':
+        actionCompleted = face.smilingProbability != null &&
+            face.smilingProbability! > 0.5;
+        break;
+      case 'blink':
+        actionCompleted = (face.leftEyeOpenProbability != null &&
+            face.leftEyeOpenProbability! < 0.3) ||
+            (face.rightEyeOpenProbability != null &&
+                face.rightEyeOpenProbability! < 0.3);
+        break;
+      case 'lookRight':
+        actionCompleted = face.headEulerAngleY != null &&
+            face.headEulerAngleY! < -10;
+        break;
+      case 'lookLeft':
+        actionCompleted = face.headEulerAngleY != null &&
+            face.headEulerAngleY! > 10;
+        break;
+    }
+
+    if (actionCompleted) {
+      currentActionIndex++;
+      if (currentActionIndex >= challengeActions.length) {
+        currentActionIndex = 0;
+        if (mounted) {
+          // Capture image after liveness success
+          final XFile image = await cameraController.takePicture();
+          // Call backend for face + phone verification
+          final verified = await verifyFaceBackend(image);
+          Navigator.pop(context, verified);
+        }
+      } else {
+        waitingForNeutral = true;
+      }
+    }
+  }
+
+  bool isNeutralPosition(Face face) {
+    return (face.smilingProbability == null ||
+        face.smilingProbability! < 0.1) &&
+        (face.leftEyeOpenProbability == null ||
+            face.leftEyeOpenProbability! > 0.7) &&
+        (face.rightEyeOpenProbability == null ||
+            face.rightEyeOpenProbability! > 0.7) &&
+        (face.headEulerAngleY == null ||
+            (face.headEulerAngleY! > -10 && face.headEulerAngleY! < 10));
+  }
+
+  Future<bool> verifyFaceBackend(XFile image) async {
+    try {
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse('http://172.16.0.212:8000/faces/verify'),
       );
+
+      request.fields['phone'] = widget.phone;
+      request.fields['liveness'] = 'true';
+      request.files.add(await http.MultipartFile.fromPath('file', image.path));
+
+      final response = await request.send();
+      final respStr = await response.stream.bytesToString();
+      final data = jsonDecode(respStr);
+
+      if (data['authorized'] == true) {
+        return true;
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Face not recognized!',
+              style: TextStyle(
+                fontFamily: 'Poppins',
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+          ),
+        );
+        return false;
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Error verifying face: $e',
+            style: TextStyle(
+              fontFamily: 'Poppins',
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+        ),
+      );
+      return false;
     }
   }
 
   @override
   void dispose() {
-    _controller?.dispose(); // camera dispose garne
+    cameraController.stopImageStream();
+    faceDetector.close();
+    cameraController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // camera initialize vako chaina bhaye loading
-    if (_controller == null || !_controller!.value.isInitialized) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
     return Scaffold(
-      backgroundColor: Colors.black,
-      body: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      appBar: AppBar(
+        backgroundColor: Colors.deepPurple,
+        foregroundColor: Colors.white,
+        // toolbarHeight: 70,
+        centerTitle: true,
+        title: const Text(
+          "Verify Your Identity",
+          style: TextStyle(fontFamily: 'Poppins', fontWeight: FontWeight.w600),
+        ),
+      ),
+      body: isCameraInitialized
+          ? Stack(
         children: [
-          Center(
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                ClipOval(
-                  child: Container(
-                    width: 250,
-                    height: 250,
-                    color: Colors.black,
-                    child: FittedBox(
-                      fit: BoxFit.cover,
-                      child: SizedBox(
-                        width: _controller!.value.previewSize!.height,
-                        height: _controller!.value.previewSize!.width,
-                        child: CameraPreview(_controller!),
-                      ),
-                    ),
-                  ),
-                ),
-                // Face ring painter
-                SizedBox(
-                  width: 300,
-                  height: 300,
-                  child: CustomPaint(
-                    painter: FaceIdRingPainter(
-                      progress: _isProcessing ? 0.8 : 1.0,
-                      activeColor:
-                      _isProcessing ? Colors.blue : Colors.white24,
-                    ),
-                  ),
-                ),
-              ],
+          // *** FIXED: Original selfie camera preview WITHOUT flip ***
+          FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: cameraController.value.previewSize!.height,
+              height: cameraController.value.previewSize!.width,
+              child: CameraPreview(cameraController),
             ),
           ),
-          const SizedBox(height: 40),
-          // status message
-          Text(
-            _statusMessage,
-            style: const TextStyle(color: Colors.white, fontSize: 18),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 30),
-          // verify button
-          ElevatedButton(
-            onPressed: _isProcessing ? null : _verifyFace,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              padding:
-              const EdgeInsets.symmetric(horizontal: 50, vertical: 15),
-            ),
-            child: _isProcessing
-                ? const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.white,
+          // *** END OF CHANGE ***
+
+          CustomPaint(painter: HeadMaskPainter(), child: Container()),
+          Positioned(
+            top: 16,
+            left: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              color: Colors.black54,
+              child: Column(
+                children: [
+                  Text(
+                    'Please ${getActionDescription(challengeActions[currentActionIndex])}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontFamily: 'Poppins',
+                      fontWeight: FontWeight.w400,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
-            )
-                : const Text("Verify Identity"),
+            ),
           ),
         ],
-      ),
+      )
+          : const Center(child: CircularProgressIndicator()),
     );
+  }
+
+
+  String getActionDescription(String action) {
+    switch (action) {
+      case 'smile':
+        return 'smile';
+      case 'blink':
+        return 'blink';
+      case 'lookRight':
+        return 'look right';
+      case 'lookLeft':
+        return 'look left';
+      default:
+        return '';
+    }
+  }
+}
+
+class HeadMaskPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.black.withOpacity(0.5)
+      ..style = PaintingStyle.fill;
+
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width * 0.4;
+
+    final path = Path()
+      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
+      ..addOval(Rect.fromCircle(center: center, radius: radius))
+      ..fillType = PathFillType.evenOdd;
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) {
+    return false;
   }
 }

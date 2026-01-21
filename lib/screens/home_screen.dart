@@ -1,14 +1,12 @@
-import 'dart:convert';
-import 'dart:typed_data';
+import 'package:face/screens/face_scan_screen.dart';
+import 'package:face/screens/login_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:camera/camera.dart';
-import 'face_scan_screen.dart';
-import 'login_screen.dart';
+import '../services/user_service.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final String phone;
+  const HomeScreen({super.key, required this.phone});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -17,134 +15,172 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   String? username;
   String? email;
-  Uint8List? firstFaceBytes;
-  final String backendUrl = "http://192.168.18.11:8000";
 
   @override
   void initState() {
     super.initState();
-    loadUserData();
+    loadUserProfile();
   }
 
-  Uint8List? decodeBase64Image(String? base64) {
-    if (base64 == null || base64.isEmpty) return null;
+  Future<void> loadUserProfile() async {
     try {
-      return base64Decode(base64);
-    } catch (e) {
-      print("Base64 decode error: $e");
-      return null;
-    }
-  }
-
-  Future<void> loadUserData() async {
-    final prefs = await SharedPreferences.getInstance();
-    final phone = prefs.getString('phone');
-    if (phone == null) return;
-
-    final res = await http.get(Uri.parse("$backendUrl/users/$phone"));
-
-    if (res.statusCode == 200) {
-      final data = jsonDecode(res.body);
-
-      Uint8List? bytes;
-      if (data['faces'] != null && data['faces'].isNotEmpty) {
-        bytes = decodeBase64Image(data['faces'][0]); // first face
-      }
-
+      final profile = await fetchUserProfile(widget.phone);
       setState(() {
-        username = data['username'];
-        email = data['email'];
-        firstFaceBytes = bytes;
+        username = profile['username'];
+        email = profile['email'];
       });
-    } else {
-      print("Failed to fetch user data: ${res.body}");
+    } catch (e) {
+      debugPrint('Error loading profile: $e');
     }
   }
 
-  Widget profileAvatar() {
-    if (firstFaceBytes == null) {
-      return const CircleAvatar(radius: 40, child: Icon(Icons.person));
-    }
-
-    return CircleAvatar(
-      radius: 40,
-      backgroundImage: MemoryImage(firstFaceBytes!),
-    );
-  }
-
-  Future<void> logout() async {
+  Future<void> logout(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
-    if (mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
-      );
-    }
-  }
 
-  // Camera only load when Face Verify tapped
-  Future<void> _openFaceScanScreen() async {
-    try {
-      final List<CameraDescription> cameras = await availableCameras();
-      if (!mounted) return;
-
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => FaceScanScreen(cameras: cameras),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Camera not available")));
-    }
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (_) => false,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-          title: const Text("Home"),
-        centerTitle: true,
-        // foregroundColor: Colors.white,
-        // backgroundColor: Colors.blue,
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Theme.of(context).colorScheme.onPrimary,
-      ),
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,
-
           children: [
-            UserAccountsDrawerHeader(
-              // decoration: BoxDecoration(
-              //   color: Colors.blue
-              // ),
-              accountName: Text(username ?? ''),
-              accountEmail: Text(email ?? ''),
-              currentAccountPicture: profileAvatar(),
+            // Drawer Header
+            DrawerHeader(
+              decoration: BoxDecoration(color: Colors.deepPurple),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const CircleAvatar(
+                    radius: 28,
+                    backgroundColor: Colors.white,
+                    child: Icon(Icons.person, size: 32, color: Colors.black87),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    username ?? 'Loading...',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onPrimary,
+                      fontSize: 18,
+                      fontFamily: 'Poppins',
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    email ?? '',
+                    style: TextStyle(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.onPrimary.withOpacity(0.8),
+                      fontFamily: 'Poppins',
+                      fontWeight: FontWeight.w100,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
             ),
+
+            // Drawer Items
             ListTile(
-              leading: const Icon(Icons.verified_user),
-              title: const Text("Face Verify"),
+              leading: const Icon(Icons.crop_free),
+              title: const Text(
+                'Verify',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
               onTap: () async {
+                // Close drawer first
                 Navigator.pop(context);
-                await _openFaceScanScreen();
+
+                await Future.delayed(const Duration(milliseconds: 200));
+
+                // Navigate and wait for result
+                final bool? verified = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => FaceScanScreen(phone: widget.phone),
+                  ),
+                );
+
+                // Show verification result
+                if (verified != null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        style: TextStyle(
+                          fontFamily: 'Poppins',
+                          fontWeight: FontWeight.w400,
+                        ),
+                        verified
+                            ? 'Face verified successfully'
+                            : 'Face verification failed',
+                      ),
+                      backgroundColor: verified ? Colors.green : Colors.red,
+                    ),
+                  );
+                }
               },
             ),
+
+            ListTile(
+              leading: const Icon(Icons.settings),
+              title: const Text(
+                'Settings',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+              },
+            ),
+
+            const Divider(),
+
             ListTile(
               leading: const Icon(Icons.logout),
-              title: const Text("Logout"),
-              onTap: logout,
+              title: const Text(
+                'Logout',
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+              onTap: () {
+                logout(context);
+              },
             ),
           ],
         ),
       ),
-      body: const Center(child: Text("Welcome!")),
+
+      appBar: AppBar(
+        backgroundColor: Colors.deepPurple,
+        foregroundColor: Colors.white,
+        centerTitle: true,
+        title: Text(
+          'Employee provident Fund',
+          style: TextStyle(fontFamily: 'Poppins', fontWeight: FontWeight.w600),
+        ),
+      ),
+
+      body: const Center(
+        child: Text(
+          "Home Screen",
+          style: TextStyle(fontFamily: 'Poppins', fontWeight: FontWeight.w500),
+        ),
+      ),
     );
   }
 }
